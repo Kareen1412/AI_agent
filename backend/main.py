@@ -249,7 +249,8 @@ def confirm(order_id: str, payload: ConfirmIn):
         tx.set(message_ref, {'message_id': payload.confirmation_message_id,
                              'customer_id': payload.customer_id, 'status': 'processed',
                              'order_id': order_id, 'processed_at': now()}, merge=True)
-        return {'success': True, 'order_id': order_id, 'status': 'confirmed'}
+        return {'success': True, 'order_id': order_id, 'status': 'confirmed',
+                'message': 'Order confirmed. Inventory deducted successfully. Thank you for your purchase!'}
 
     return commit(db.transaction())
 

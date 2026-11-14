@@ -230,7 +230,13 @@ class MacotAgent:
                 self._record(s, message, reply)
                 return self._result(s, reply, extracted, needs_human=True)
             if s.confirmed:
-                reply = 'This order is already confirmed. Please contact our team to change it.'
+                if extracted.intent in {'greeting', 'general_question'} and self._is_thanks(message):
+                    reply = self._post_confirmation_thanks(s, extracted.language)
+                elif extracted.intent in {'add_to_cart', 'edit_cart', 'remove_item', 'checkout', 'approve_order'}:
+                    reply = ('Your order ' + str(s.order_id) + ' is already confirmed. '
+                             'For changes or a new order, please contact our team.')
+                else:
+                    reply = extracted.reply or self._post_confirmation_thanks(s, extracted.language)
                 self._record(s, message, reply)
                 return self._result(s, reply, extracted)
             changes = extracted.item_changes
@@ -244,7 +250,7 @@ class MacotAgent:
                     if not result.get('success', False):
                         raise BackendError(result.get('message', 'Confirmation failed'))
                     s.confirmed, s.awaiting_confirmation = True, False
-                    reply = f'Your order {s.order_id} is confirmed!'
+                    reply = self._confirmation_thanks(s, extracted.language)
                 self._record(s, message, reply)
                 return self._result(s, reply, extracted)
             new_items, new_pending = apply_changes(s.items, s.pending_items, changes, catalog)
@@ -270,6 +276,10 @@ class MacotAgent:
                 try:
                     quote = self.tools.quote(s.order_id)
                 except BackendError as exc:
+                    stock_reply = self._stock_error_reply(exc, extracted.language)
+                    if stock_reply:
+                        self._record(s, message, stock_reply)
+                        return self._result(s, stock_reply, extracted)
                     if 'delivery_fees.flat' in str(exc):
                         reply = ('The shop delivery fee is not configured yet. I saved your order details; '
                                  'the shop must set the delivery fee before I can show a total.')
@@ -289,6 +299,12 @@ class MacotAgent:
             self._record(s, message, reply)
             return self._result(s, reply, extracted)
         except Exception as exc:
+            if isinstance(exc, BackendError):
+                stock_reply = self._stock_error_reply(exc, getattr(s, 'last_language', 'english'))
+                if stock_reply:
+                    return {'reply': stock_reply, 'error': str(exc), 'order_id': s.order_id,
+                            'order_status': 'confirmed' if s.confirmed else 'draft',
+                            'state': s.state(), 'missing_fields': missing_fields(s)}
             if isinstance(exc, errors.APIError) and getattr(exc, 'code', None) == 503:
                 reply = 'The assistant is temporarily busy. Please resend your last message in a moment; your existing order details are still saved.'
             else:
@@ -296,6 +312,53 @@ class MacotAgent:
             return {'reply': reply,
                     'error': str(exc), 'order_id': s.order_id,
                     'order_status': 'confirmed' if s.confirmed else 'draft'}
+
+    @staticmethod
+    def _is_thanks(message):
+        text = message.casefold().strip()
+        return bool(re.search(r"\b(thanks|thank you|thank u|thx|merci|mersi|shukran|choukran|ty)\b", text)) or any(
+            word in text for word in ('شكرا', 'شكراً', 'يسلمو', 'مشكور', 'تسلم'))
+
+    @staticmethod
+    def _confirmation_thanks(s, language):
+        lang = language.casefold()
+        if lang in {'arabic', 'ar'}:
+            return f'تم تأكيد طلبك رقم {s.order_id} بنجاح! شكراً لثقتك فينا ❤️'
+        if lang in {'arabizi', 'lebanese', 'lebanese arabic', 'lebanese_arabic'}:
+            return f'Ta2akkad talabik {s.order_id}! Merci ktir 3a thi2tik fina ❤️'
+        return f'Your order {s.order_id} is confirmed! Thank you for shopping with us ❤️'
+
+    @staticmethod
+    def _post_confirmation_thanks(s, language):
+        lang = language.casefold()
+        if lang in {'arabic', 'ar'}:
+            return f'أهلاً وسهلاً! شكراً إلك ❤️ طلبك {s.order_id} تأكّد.'
+        if lang in {'arabizi', 'lebanese', 'lebanese arabic', 'lebanese_arabic'}:
+            return f'Ahla w sahla! Merci elik ❤️ Talabik {s.order_id} ta2akkad.'
+        return f'You’re very welcome! ❤️ Your order {s.order_id} is confirmed.'
+
+    @staticmethod
+    def _stock_error_reply(exc, language):
+        # Stock is authoritative ONLY when reported by the backend.
+        message = str(exc)
+        if not any(term in message.casefold() for term in
+                   ('insufficient stock', 'out of stock', 'product unavailable')):
+            return None
+        match = re.search(r'Insufficient stock for ([^;]+); available: (\d+)', message, re.I)
+        arabic = language.casefold() in {'arabic', 'ar'}
+        arabizi = language.casefold() in {'arabizi', 'lebanese', 'lebanese arabic', 'lebanese_arabic'}
+        if match:
+            sku, available = match.groups()
+            if arabic:
+                return f'للأسف، الكمية المتوفرة من {sku} هي {available} فقط. بدك كمية أقل أو قياس/لون تاني؟'
+            if arabizi:
+                return f'La2anno men {sku} fi bas {available} bel stock. Baddek adad a2al aw size/color tene?'
+            return f'Sorry, only {available} of {sku} are in stock. Would you like fewer or another size/color?'
+        if arabic:
+            return 'للأسف هالقطعة مش متوفرة حالياً. بدك نشوف خيارات تانية؟'
+        if arabizi:
+            return 'La2anno hal item mesh available halla2. Baddek nchouf options tenye?'
+        return 'Sorry, that item is currently unavailable. Would you like to see other options?'
 
     @staticmethod
     def _record(s, message, reply):
