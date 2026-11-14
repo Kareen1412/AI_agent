@@ -182,14 +182,7 @@ class MacotAgent:
             api_key=key,
             http_options=types.HttpOptions(timeout=timeout_ms),
         )
-        self.models = [
-            model.strip()
-            for model in os.getenv(
-                "GEMINI_MODELS",
-                "gemini-3.8-flash,gemini-3-flash-preview"
-            ).split(",")
-            if model.strip()
-        ]
+        self.model = "gemini-3.5-flash-lite"
         self.tools = MacotTools()
         self.sessions: dict[str, Session] = {}
 
@@ -203,54 +196,20 @@ class MacotAgent:
             'instruction': 'Return changes from the latest message, NOT all accumulated items. '
                            'Do not re-add existing items unless customer requested an addition.'
         }, ensure_ascii=False)
-        last_error = None
-
-        for model in self.models:
-            started = time.perf_counter()
-            try:
-                print(f"Trying model: {model}")
-
-                response = self.client.models.generate_content(
-                    model=model,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=SYSTEM,
-                        response_mime_type="application/json",
-                        response_schema=AgentOutput,
-                        temperature=0.2,
-                    ),
-                )
-
-                if not response.text:
-                    raise ValueError("Gemini returned an empty response")
-
-                output = AgentOutput.model_validate_json(response.text)
-                print(f"Success with {model} in {time.perf_counter() - started:.2f}s")
-                return output
-
-            except errors.APIError as exc:
-                if exc.code in (429, 503, 504):
-                    print(f"{model} unavailable ({exc.code}) after "
-                          f"{time.perf_counter() - started:.2f}s. Switching...")
-                    last_error = exc
-                    continue
-
-                # 404 can indicate a model that was retired. Try the next one.
-                if exc.code == 404:
-                    print(f"{model} not found. Switching model...")
-                    last_error = exc
-                    continue
-                # Other errors (e.g. bad API key) should be surfaced.
-                raise
-            except (httpx.TimeoutException, TimeoutError) as exc:
-                print(f"{model} timed out after "
-                      f"{time.perf_counter() - started:.2f}s. Switching...")
-                last_error = exc
-                continue
-
-        raise RuntimeError(
-            f"All configured Gemini models are unavailable. Last error: {last_error}"
+        print(f"Using model: {self.model}")
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=SYSTEM,
+                response_mime_type="application/json",
+                response_schema=AgentOutput,
+                temperature=0.2,
+            ),
         )
+        if not response.text:
+            raise ValueError("Gemini returned an empty response")
+        return AgentOutput.model_validate_json(response.text)
 
     def chat(self, customer_id: str, message: str, message_id: str | None = None) -> dict:
         s = self.sessions.setdefault(customer_id, Session(customer_id))

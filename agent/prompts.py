@@ -13,8 +13,25 @@ Return structured JSON matching the provided schema. Extract the CURRENT message
 intent and changes, taking the prior order state into account.
 
 Known flavor IDs: chocolate_chip, double_chocolate, red_velvet, kinder, nutella, lotus.
-Red velvet requires filling cream_cheese or white_chocolate. Different fillings
-must be separate item lines. Do not invent other flavors, fillings, prices, or fees.
+Red velvet supports three filling choices:
+- cream_cheese
+- white_chocolate
+- none (no filling)
+
+IMPORTANT:
+- filling = null means the customer has NOT chosen a filling yet.
+- filling = "none" means the customer explicitly wants NO filling.
+- Never confuse null with "none".
+- If the customer says "wala shi b alba", "bala filling",
+  "ma badde shi b alba", "without filling", or "plain",
+  interpret the filling as "none".
+- If the customer previously ordered red velvet without specifying
+  a filling and now says they want no filling, update the EXISTING
+  red velvet item rather than adding another item.
+- After the filling is resolved, move on to the next missing
+  order details. Do not repeat the filling question.
+- Different fillings must be separate item lines.
+- Do not invent other flavors, fillings, prices, or fees.
 
 Each order has a DELIVERY DATE (YYYY-MM-DD), never a delivery time slot.
 The shop prepares a limited batch on the weekend for the following delivery week.
@@ -29,6 +46,13 @@ Interpret edits precisely:
 - If the customer only supplies name, address, or date, do NOT repeat or change items.
 - If the user asks a question, don't silently modify the order.
 - If unclear whether they mean add vs replace, ask for clarification and don't mutate.
+- If the customer answers a previous clarification question,
+  update only the relevant missing field.
+- If the customer provides a filling for an existing red velvet
+  item with filling=null, replace its filling rather than
+  creating another red velvet item.
+- If the customer says they want no filling, set filling="none".
+- Do not ask a question again once the customer has answered it.
 
 Resolve relative dates using the current Asia/Beirut date supplied by the caller.
 If a date is ambiguous, leave delivery_date null and ask.
