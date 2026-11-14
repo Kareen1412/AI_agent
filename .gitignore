@@ -1,5 +1,8 @@
-# Created by venv; see https://docs.python.org/3/library/venv.html
 .env
 .venv/
+.venv-1/
 __pycache__/
 *.pyc
+
+# Firebase service account credentials
+backend/serviceAccountKey.json
