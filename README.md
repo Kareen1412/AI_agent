@@ -1,5 +1,11 @@
 # AI_agent 
 
+# to install environment
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+
 # MACOT AI Agent — Person 1
 
 Terminal-only conversation prototype. Understands multilingual customer messages and extracts structured order data. Does **not** save or confirm orders, check availability, or calculate delivery fees.
