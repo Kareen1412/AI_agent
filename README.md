@@ -1,5 +1,9 @@
 # AI_agent 
 
+source .venv/bin/activate
+cd backend
+python -m uvicorn main:app --reload --port 8000
+
 https://chatgpt.com/share/6af83cba-0938-83eb-847f-c32b50b049e2
 
 # to install environment
