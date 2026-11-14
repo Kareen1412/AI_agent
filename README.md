@@ -1,5 +1,7 @@
 # AI_agent 
 
+https://chatgpt.com/share/6af83cba-0938-83eb-847f-c32b50b049e2
+
 # to install environment
 
 python3 -m venv .venv
