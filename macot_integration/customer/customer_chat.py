@@ -1,31 +1,44 @@
+
+import sys
+from pathlib import Path
 import streamlit as st
 
-# github is a bitch literally
+# Locate the AI_agent project folder
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT / "agent"))
 
-# Page configuration
+from agent import MacotAgent
+
 st.set_page_config(
-    page_title="MACOT Cookies",
-    page_icon="🍪",
+    page_title="MACOT Clothing",
+    page_icon="🛍️",
     layout="centered"
 )
 
-# Chat header
-st.title("🍪 MACOT Cookies")
-st.caption("Your AI Cookie Ordering Assistant")
+st.title("🛍️ MACOT")
+st.caption("Your AI Shopping Assistant")
 
-# Initialize conversation history
+# Keep one agent instance across Streamlit reruns
+@st.cache_resource
+def load_agent():
+    return MacotAgent()
+
+agent = load_agent()
+
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display previous messages
+if "customer_id" not in st.session_state:
+    st.session_state.customer_id = "demo_customer_001"
+
+# Display conversation history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.write(message["content"])
 
-# Customer message input
-if prompt := st.chat_input("Type your message..."):
+# Handle customer messages
+if prompt := st.chat_input("Ask about products or place an order..."):
 
-    # Display customer's message
     st.session_state.messages.append({
         "role": "user",
         "content": prompt
@@ -34,13 +47,17 @@ if prompt := st.chat_input("Type your message..."):
     with st.chat_message("user"):
         st.write(prompt)
 
-    # Temporary response (we'll connect Gemini later)
-    reply = "Ahla! 🍪 Welcome to MACOT! How can I help you?"
+    with st.chat_message("assistant"):
+        with st.spinner("MACOT is typing..."):
+            result = agent.chat(
+                customer_id=st.session_state.customer_id,
+                message=prompt
+            )
+
+            reply = result["reply"]
+            st.write(reply)
 
     st.session_state.messages.append({
         "role": "assistant",
         "content": reply
     })
-
-    with st.chat_message("assistant"):
-        st.write(reply)
