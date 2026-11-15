@@ -299,6 +299,8 @@ class MacotAgent:
             self._record(s, message, reply)
             return self._result(s, reply, extracted)
         except Exception as exc:
+            import traceback
+            traceback.print_exc()
             if isinstance(exc, BackendError):
                 stock_reply = self._stock_error_reply(exc, getattr(s, 'last_language', 'english'))
                 if stock_reply:
