@@ -3,6 +3,19 @@
 Firestore products/{product_id} contain variants [{sku,size,color,stock}].
 Only the backend computes prices and changes inventory. Protect endpoints before public deployment.
 """
+import os
+import secrets
+from pathlib import Path
+from dotenv import load_dotenv
+from fastapi import Header
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+load_dotenv(
+    PROJECT_ROOT / "macot_integration" / ".env",
+    override=True
+)
+
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 from collections import defaultdict
@@ -259,3 +272,51 @@ def confirm(order_id: str, payload: ConfirmIn):
 def list_orders(limit: int = Query(default=50, ge=1, le=200)):
     # TODO: require authentication/authorization before public deployment.
     return {'orders': [s.to_dict() for s in db.collection('orders').limit(limit).stream()]}
+
+
+# Owner dashboard endpoints. Never expose these without a strong admin token.
+def require_admin(authorization: str | None):
+    token = os.getenv("ADMIN_API_TOKEN", "").strip()
+    if not token:
+        fail(503, "ADMIN_API_TOKEN is not configured on the backend")
+    if not authorization or not secrets.compare_digest(authorization, f"Bearer {token}"):
+        fail(401, "Invalid admin token")
+
+
+class StatusUpdate(BaseModel):
+    status: str
+
+
+@app.get('/admin/connection')
+def admin_connection(authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    # Live reads; this is not seeded or placeholder data.
+    product_docs = list(db.collection('products').stream())
+    order_docs = list(db.collection('orders').limit(200).stream())
+    return {'connected': True, 'products': len(product_docs),
+            'orders_sampled': len(order_docs),
+            'source': 'Firestore via backend/firebase_client.py'}
+
+
+@app.patch('/admin/orders/{order_id}/status')
+def admin_update_status(order_id: str, payload: StatusUpdate,
+                        authorization: str | None = Header(default=None)):
+    require_admin(authorization)
+    allowed = {'confirmed': {'preparing', 'cancelled'},
+               'preparing': {'out_for_delivery', 'cancelled'},
+               'out_for_delivery': {'delivered'}}
+    ref = db.collection('orders').document(order_id)
+
+    @gc_firestore.transactional
+    def update(tx):
+        snap = ref.get(transaction=tx)
+        if not snap.exists:
+            fail(404, 'Order not found')
+        current = (snap.to_dict() or {}).get('status')
+        if payload.status not in allowed.get(current, set()):
+            fail(409, f'Cannot change status from {current} to {payload.status}')
+        # Cancellation does not restore inventory; that needs a separate idempotent workflow.
+        tx.update(ref, {'status': payload.status, 'updated_at': now()})
+        return {'order_id': order_id, 'status': payload.status, 'success': True}
+
+    return update(db.transaction())

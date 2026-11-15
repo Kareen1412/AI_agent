@@ -1,14 +1,21 @@
-"""MACOT shop-owner dashboard, backed by the existing FastAPI endpoints."""
+"""MACOT clothing dashboard: live Firestore data through the FastAPI backend.
+
+Run from project root: streamlit run dashboard/app.py
+Requires BACKEND_URL and ADMIN_API_TOKEN in project .env.
+"""
 import os
-from datetime import date, timedelta
+from datetime import date
+from pathlib import Path
 
 import httpx
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-load_dotenv()
-st.set_page_config(page_title="MACOT | Owner Space", page_icon="🍪", layout="wide")
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+load_dotenv(PROJECT_ROOT / ".env", override=True)
+st.set_page_config(page_title="MACOT | Owner Space", page_icon="👕", layout="wide")
 
 st.markdown(
     """
@@ -44,15 +51,15 @@ st.markdown(
         border-right: 1px solid rgba(255,255,255,.07);
     }
     [data-testid="stSidebar"] > div:first-child { padding-top: 1.5rem; }
-    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #c2cdbb; }
+    [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { color: #f2f7ee; }
     [data-testid="stSidebar"] [data-testid="stWidgetLabel"] p {
-        color: #a7b89c; font-size: .68rem; font-weight: 700;
+        color: #eaf4e3; font-size: .68rem; font-weight: 700;
         letter-spacing: .14em; text-transform: uppercase;
     }
     [data-testid="stSidebar"] .stRadio [role="radiogroup"] { gap: .35rem; }
     [data-testid="stSidebar"] .stRadio label {
         min-height: 2.8rem; padding: .12rem .65rem; border-radius: 10px;
-        color: #e0e5d9; transition: background .14s ease;
+        color: #ffffff; transition: background .14s ease;
     }
     [data-testid="stSidebar"] .stRadio label:hover { background: rgba(255,255,255,.075); }
     [data-testid="stSidebar"] .stRadio label p { color: inherit !important; font-weight: 600; }
@@ -69,11 +76,11 @@ st.markdown(
         color: #f7f4ea;
     }
     .side-name { margin: 0; color: #f7f4ea; font-size: 1.08rem; font-weight: 750; letter-spacing: .04em; }
-    .side-caption { margin: .16rem 0 0; color: #a6b49b; font-size: .68rem; letter-spacing: .11em; text-transform: uppercase; }
+    .side-caption { margin: .16rem 0 0; color: #f2f7ee; font-size: .68rem; letter-spacing: .11em; text-transform: uppercase; }
     .side-foot {
         margin-top: 2rem; padding: .85rem .9rem; border: 1px solid rgba(255,255,255,.09);
         border-radius: 12px; background: rgba(255,255,255,.035);
-        color: #c2cdbb; font-size: .73rem; line-height: 1.55;
+        color: #f2f7ee; font-size: .73rem; line-height: 1.55;
     }
     .hero {
         position: relative; overflow: hidden; display: flex; align-items: center;
@@ -95,7 +102,7 @@ st.markdown(
         font-weight: 750; letter-spacing: .16em; text-transform: uppercase;
     }
     .hero-title { margin: 0; color: #faf7ee; font-size: 1.78rem; font-weight: 720; letter-spacing: -.045em; }
-    .hero-subtitle { margin: .38rem 0 0; color: #d5ddce; font-size: .86rem; }
+    .hero-subtitle { margin: .38rem 0 0; color: #ffffff; font-size: .86rem; }
     .hero-date {
         flex: 0 0 auto; padding: .65rem .9rem; border: 1px solid rgba(255,255,255,.16);
         border-radius: 999px; background: rgba(255,255,255,.07);
@@ -162,7 +169,7 @@ st.markdown(
 )
 
 base_url = os.getenv("BACKEND_URL", "http://127.0.0.1:8000").rstrip("/")
-admin_token = os.getenv("ADMIN_API_TOKEN", "dwabKBBAJs66v-TXlQJX9xy8ivbpYNbaF9oUlEDlMb8").strip()
+admin_token = os.getenv("ADMIN_API_TOKEN", "").strip()
 if not admin_token:
     st.error("Dashboard access is not configured. Set ADMIN_API_TOKEN in your .env file.")
     st.stop()
@@ -222,9 +229,8 @@ def order_rows(orders):
         {
             "Order": f"#{order.get('order_id') or '—'}",
             "Customer": order.get("customer_name") or "—",
-            "Delivery date": order.get("delivery_date") or "—",
-            "Cookies": order.get("total_cookies") or "—",
-            "Total": money(order.get("total")),
+            "Items": order.get("total_items", 0),
+            "Total": money(order.get("total")) if order.get("total") is not None else "Not quoted",
             "Status": str(order.get("status") or "unknown").replace("_", " ").title(),
         }
         for order in orders
@@ -243,312 +249,176 @@ def heading(kicker, title, subtitle):
 page_titles = {
     "Overview": "Today at MACOT",
     "Orders": "Order management",
-    "Capacity": "Daily capacity",
-    "Menu": "Cookie menu",
+    "Inventory": "Clothing inventory",
 }
 page_subtitles = {
-    "Overview": "A clear view of what is moving through your shop.",
-    "Orders": "Find a delivery, check its details, and update its status.",
-    "Capacity": "Set a comfortable limit for every baking day.",
-    "Menu": "Keep your flavors and prices ready for the next order.",
+    "Overview": "A clear view of your clothing shop and orders.",
+    "Orders": "Review orders and track their fulfillment.",
+    "Inventory": "Available products, sizes, colors, and stock from Firestore.",
 }
-page_icons = {"Overview": "⌂", "Orders": "▤", "Capacity": "◷", "Menu": "✳"}
+page_icons = {"Overview": "⌂", "Orders": "▤", "Inventory": "▦"}
 
 with st.sidebar:
     st.markdown(
         """
         <div class="side-brand">
-          <div class="side-mark">🍪</div>
+          <div class="side-mark">👕</div>
           <div>
             <p class="side-name">MACOT</p>
             <p class="side-caption">Owner space</p>
           </div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """, unsafe_allow_html=True,
     )
     st.markdown("### Workspace")
     page = st.radio(
-        "Navigation",
-        list(page_titles),
+        "Navigation", list(page_titles),
         format_func=lambda value: f"{page_icons[value]}   {value}",
-        label_visibility="collapsed",
-        key="macot_navigation",
+        label_visibility="collapsed", key="macot_navigation",
     )
     st.markdown(
-        """
-        <div class="side-foot">
-          <span class="status-dot"></span>Owner tools<br>
-          <span style="color:#a6b49b">Manage today. Bake with confidence.</span>
-        </div>
-        """,
+        """<div class="side-foot"><span class="status-dot"></span>Owner tools<br>
+        <span style="color:#f4f8ef">Manage your clothing shop with confidence.</span></div>""",
         unsafe_allow_html=True,
     )
 
 st.markdown(
-    f"""
-    <div class="hero">
-      <div class="hero-copy">
-        <p class="hero-eyebrow">MACOT &nbsp; / &nbsp; OWNER DASHBOARD</p>
-        <h1 class="hero-title">{page_titles[page]}</h1>
-        <p class="hero-subtitle">{page_subtitles[page]}</p>
-      </div>
-      <div class="hero-date">{date.today().strftime("%A, %B %d")}</div>
-    </div>
-    """,
+    f"""<div class="hero"><div class="hero-copy">
+    <p class="hero-eyebrow">MACOT &nbsp; / &nbsp; OWNER DASHBOARD</p>
+    <h1 class="hero-title">{page_titles[page]}</h1>
+    <p class="hero-subtitle">{page_subtitles[page]}</p></div>
+    <div class="hero-date">{date.today().strftime('%A, %B %d')}</div></div>""",
     unsafe_allow_html=True,
 )
 
+
+def inventory_rows(products, only_available=True):
+    rows = []
+    for product in products:
+        if only_available and not product.get("available", False):
+            continue
+        for variant in product.get("variants", []):
+            stock = int(number(variant.get("stock")))
+            if only_available and stock <= 0:
+                continue
+            rows.append({
+                "Product": product.get("name") or product.get("product_id", "—"),
+                "Category": product.get("category", "—"),
+                "SKU": variant.get("sku", "—"),
+                "Size": variant.get("size", "—"),
+                "Color": variant.get("color", "—"),
+                "Price": money(product.get("price")),
+                "In stock": stock,
+            })
+    return rows
+
+
+# Check the backend/Firestore connection on every Streamlit rerun.
+connection = api("GET", "/admin/connection")
+if connection is None:
+    st.warning("No live Firestore data can be displayed until the backend is reachable "
+               "and ADMIN_API_TOKEN matches in both processes.")
+    st.stop()
+st.caption(f"● Live Firestore connection · {connection.get('products', 0)} products · "
+           f"{connection.get('orders_sampled', 0)} recent orders")
+
 if page == "Overview":
     orders_payload = api("GET", "/orders", params={"limit": 200})
-    all_orders = records(orders_payload, "orders") if orders_payload is not None else []
-    active_orders = [
-        order for order in all_orders
-        if str(order.get("status", "")).lower() not in {"delivered", "cancelled"}
-    ]
-    pending_count = sum(
-        str(order.get("status", "")).lower() in {"draft", "quoted", "confirmed"}
-        for order in all_orders
-    )
-    cookie_count = sum(number(order.get("total_cookies")) for order in active_orders)
-    sales_total = sum(
-        number(order.get("total")) for order in all_orders
-        if str(order.get("status", "")).lower() != "cancelled"
-    )
-
-    heading("Shop overview", "Your numbers, at a glance", "Based on the latest orders returned by your shop API.")
-    metric_cols = st.columns(4, gap="medium")
-    metric_cols[0].metric("All orders", f"{len(all_orders):,}")
-    metric_cols[1].metric("Need attention", f"{pending_count:,}")
-    metric_cols[2].metric("Cookies in progress", f"{cookie_count:,.0f}")
-    metric_cols[3].metric("Order value", money(sales_total))
-
+    products_payload = api("GET", "/products")
+    orders = records(orders_payload, "orders") if orders_payload is not None else []
+    products = records(products_payload, "items") if products_payload is not None else []
+    awaiting = sum(o.get("status") in ("draft", "quoted") for o in orders)
+    confirmed_value = sum(number(o.get("total")) for o in orders
+                          if o.get("status") in ("confirmed", "preparing", "out_for_delivery", "delivered"))
+    available_variants = inventory_rows(products)
+    heading("Shop overview", "Your numbers, at a glance", "Based on the latest data from your shop API.")
+    cols = st.columns(4, gap="medium")
+    cols[0].metric("Orders shown", len(orders))
+    cols[1].metric("Awaiting confirmation", awaiting)
+    cols[2].metric("Available variants", len(available_variants))
+    cols[3].metric("Confirmed order value", money(confirmed_value))
     st.markdown("<br>", unsafe_allow_html=True)
-    recent_col, capacity_col = st.columns([1.7, 1], gap="large")
-    with recent_col:
-        heading("Latest activity", "Recent orders", "The most recent orders available from your API.")
-        if all_orders:
-            recent_orders = sorted(
-                all_orders,
-                key=lambda order: str(order.get("delivery_date") or ""),
-                reverse=True,
-            )[:6]
-            st.dataframe(
-                pd.DataFrame(order_rows(recent_orders)),
-                use_container_width=True,
-                hide_index=True,
-                height=min(340, 42 + 36 * len(recent_orders)),
-            )
-        elif orders_payload is not None:
-            st.info("No orders have come through yet.")
-
-    with capacity_col:
-        tomorrow = date.today() + timedelta(days=1)
-        heading("Next delivery day", tomorrow.strftime("%A, %B %d"), "A quick look at tomorrow's availability.")
-        capacity = api(
-            "GET", "/availability",
-            params={"date": tomorrow.isoformat(), "quantity": 1},
-        )
-        if capacity is not None:
-            is_available = bool(capacity.get("available"))
-            status_color = "#617b56" if is_available else "#ae6758"
-            status_text = "Accepting orders" if is_available else "At capacity"
-            st.markdown(
-                f"""
-                <div style="padding:1rem 1.05rem;border:1px solid var(--line);border-radius:14px;background:var(--paper)">
-                  <p class="panel-kicker">AVAILABILITY</p>
-                  <p class="panel-value" style="color:{status_color}">{status_text}</p>
-                  <p class="panel-note">For {tomorrow.strftime("%B %d")}</p>
-                </div>
-                """,
-                unsafe_allow_html=True,
-            )
-            st.markdown("<br>", unsafe_allow_html=True)
-            remain_orders, remain_cookies = st.columns(2, gap="small")
-            remain_orders.metric("Orders left", capacity.get("remaining_orders", "—"))
-            remain_cookies.metric("Cookies left", capacity.get("remaining_cookies", "—"))
+    heading("Latest activity", "Recent orders", "Up to 6 orders from the latest API response.")
+    if orders:
+        recent = sorted(orders, key=lambda o: str(o.get("updated_at") or o.get("created_at") or ""), reverse=True)[:6]
+        st.dataframe(pd.DataFrame(order_rows(recent)), use_container_width=True,
+                     hide_index=True, height=min(340, 42 + 36 * len(recent)))
+    elif orders_payload is not None:
+        st.info("No orders found.")
 
 elif page == "Orders":
-    heading("Fulfillment", "Track every delivery", "Filter by delivery date or search by customer, order, or status.")
-    date_col, search_col, refresh_col = st.columns([1.05, 1.5, .75], gap="medium")
-    with date_col:
-        selected_date = st.date_input(
-            "Delivery date", value=date.today(), key="orders_delivery_date"
-        )
+    heading("Fulfillment", "Track every order", "Search by customer, order ID, or status.")
+    search_col, refresh_col = st.columns([3, 1], gap="medium")
     with search_col:
-        query = st.text_input(
-            "Search orders", placeholder="Customer, order ID, or status",
-            key="orders_search",
-        ).strip().lower()
+        query = st.text_input("Search orders", placeholder="Customer, order ID, or status").strip().lower()
     with refresh_col:
         st.markdown("<div style='height:1.85rem'></div>", unsafe_allow_html=True)
-        if st.button("↻  Refresh", use_container_width=True, key="refresh_orders"):
+        if st.button("↻ Refresh", use_container_width=True):
             st.rerun()
-
-    payload = api(
-        "GET", "/orders",
-        params={"date": selected_date.isoformat(), "limit": 200},
-    )
+    payload = api("GET", "/orders", params={"limit": 200})
     orders = records(payload, "orders") if payload is not None else []
-    # The backend may ignore the optional date parameter; keep the displayed day accurate.
-    orders = [
-        order for order in orders
-        if not order.get("delivery_date")
-        or str(order.get("delivery_date"))[:10] == selected_date.isoformat()
-    ]
     if query:
-        orders = [
-            order for order in orders
-            if query in " ".join(
-                str(order.get(field) or "")
-                for field in ("order_id", "customer_name", "status")
-            ).lower()
-        ]
-
+        orders = [o for o in orders if query in " ".join(str(o.get(k) or "")
+                  for k in ("order_id", "customer_name", "status", "phone")).lower()]
     if orders:
-        st.dataframe(
-            pd.DataFrame(order_rows(orders)),
-            use_container_width=True,
-            hide_index=True,
-            height=min(500, 42 + 36 * len(orders)),
-        )
-        st.markdown("#### Update an order")
-        ids = [str(order.get("order_id")) for order in orders if order.get("order_id")]
-        if ids:
-            lookup = {
-                str(order.get("order_id")): order
-                for order in orders if order.get("order_id")
-            }
-            order_col, status_col, action_col = st.columns([1.6, 1.2, .8], gap="medium")
-            with order_col:
-                order_id = st.selectbox(
-                    "Order",
-                    ids,
-                    format_func=lambda value: order_label(lookup[value]),
-                    key="order_to_update",
-                )
-            statuses = [
-                "confirmed", "preparing", "out_for_delivery", "delivered", "cancelled"
-            ]
-            current = str(lookup[order_id].get("status") or "").lower()
-            default_index = statuses.index(current) if current in statuses else 0
-            with status_col:
-                status = st.selectbox(
-                    "New status",
-                    statuses,
-                    index=default_index,
-                    format_func=lambda value: value.replace("_", " ").title(),
-                    key="new_order_status",
-                )
-            with action_col:
-                st.markdown("<div style='height:1.85rem'></div>", unsafe_allow_html=True)
-                if st.button("Save update", use_container_width=True, key="save_order_status"):
-                    result = api(
-                        "PATCH", f"/orders/{order_id}", json={"status": status}
-                    )
+        st.dataframe(pd.DataFrame(order_rows(orders)), use_container_width=True,
+                     hide_index=True, height=min(500, 42 + 36 * len(orders)))
+        heading("Order details", "Selected order", "Inspect the items and delivery information.")
+        lookup = {str(o["order_id"]): o for o in orders if o.get("order_id")}
+        if lookup:
+            oid = st.selectbox("Order", list(lookup), format_func=lambda k: order_label(lookup[k]))
+            order = lookup[oid]
+            st.write("**Customer:**", order.get("customer_name") or "—")
+            st.write("**Phone:**", order.get("phone") or "—")
+            st.write("**Address:**", order.get("delivery_address") or "—")
+            lines = [{"Product": i.get("product_name", i.get("product_id", "—")),
+                      "SKU": i.get("sku", "—"), "Size": i.get("size", "—"),
+                      "Color": i.get("color", "—"), "Quantity": i.get("quantity", 0),
+                      "Subtotal": money(i.get("subtotal"))} for i in order.get("items", [])]
+            if lines:
+                st.dataframe(pd.DataFrame(lines), use_container_width=True, hide_index=True)
+            current = str(order.get("status") or "draft")
+            next_statuses = {
+                "confirmed": ["preparing", "cancelled"],
+                "preparing": ["out_for_delivery", "cancelled"],
+                "out_for_delivery": ["delivered"],
+            }.get(current, [])
+            if next_statuses:
+                chosen = st.selectbox("Update fulfillment status", next_statuses,
+                                      format_func=lambda x: x.replace("_", " ").title())
+                if st.button("Save status update"):
+                    result = api("PATCH", f"/admin/orders/{oid}/status", json={"status": chosen})
                     if result is not None:
-                        st.success("Order status updated.")
+                        st.success("Order updated.")
                         st.rerun()
+            else:
+                st.caption("No fulfillment status updates available for this order.")
     elif payload is not None:
-        st.info("No orders match this date and search.")
+        st.info("No orders match your search.")
 
-elif page == "Capacity":
-    heading("Production planning", "Set your daily limits", "Check what remains, then choose how much work to take on.")
-    capacity_date = st.date_input(
-        "Capacity date", value=date.today() + timedelta(days=1), key="capacity_date"
-    )
-    capacity = api(
-        "GET", "/availability",
-        params={"date": capacity_date.isoformat(), "quantity": 1},
-    )
-    if capacity is not None:
-        avail_col, orders_col, cookies_col = st.columns(3, gap="medium")
-        avail_col.metric("Orders open", "Yes" if capacity.get("available") else "No")
-        orders_col.metric("Orders remaining", capacity.get("remaining_orders", "—"))
-        cookies_col.metric("Cookies remaining", capacity.get("remaining_cookies", "—"))
-
-    st.markdown("<br>", unsafe_allow_html=True)
-    heading("Capacity settings", "Make room for the right amount", "These limits apply to the selected date.")
-    with st.form("capacity_form"):
-        order_limit_col, cookie_limit_col = st.columns(2, gap="large")
-        with order_limit_col:
-            max_orders = st.number_input("Maximum orders", min_value=0, value=10, step=1)
-        with cookie_limit_col:
-            max_cookies = st.number_input("Maximum cookies", min_value=0, value=120, step=10)
-        enabled = st.toggle("Accept orders for this date", value=True)
-        if st.form_submit_button("Save capacity"):
-            result = api(
-                "PATCH",
-                f"/delivery-capacity/{capacity_date.isoformat()}",
-                json={
-                    "max_orders": max_orders,
-                    "max_cookies": max_cookies,
-                    "enabled": enabled,
-                },
-            )
-            if result is not None:
-                st.success("Daily capacity updated.")
-
-elif page == "Menu":
-    heading("Menu management", "Your flavors, your way", "See what's available and adjust pricing without leaving the dashboard.")
-    menu_payload = api("GET", "/menu")
-    if menu_payload is not None:
-        items = records(menu_payload, "items")
-        if items:
-            st.dataframe(
-                pd.DataFrame(items),
-                use_container_width=True,
-                hide_index=True,
-                height=min(380, 42 + 36 * len(items)),
-            )
-            st.markdown("<br>", unsafe_allow_html=True)
-            heading("Quick edit", "Update a flavor", "Choose an item, set its price, and control availability.")
-
-            def flavor_label(item):
-                name = (
-                    item.get("name") or item.get("flavor")
-                    or item.get("flavor_name") or "Cookie flavor"
-                )
-                price = item.get("price")
-                return f"{name} · {money(price)}" if price is not None else str(name)
-
-            flavor_col, availability_col, price_col = st.columns([1.5, 1, 1], gap="medium")
-            with flavor_col:
-                flavor_index = st.selectbox(
-                    "Flavor",
-                    range(len(items)),
-                    format_func=lambda index: flavor_label(items[index]),
-                    key="flavor_to_edit",
-                )
-            selected_flavor = items[flavor_index]
-            flavor_id = selected_flavor.get("flavor_id") or selected_flavor.get("id")
-            with availability_col:
-                available = st.checkbox(
-                    "Available",
-                    value=bool(selected_flavor.get("available", True)),
-                    key=f"flavor_available_{flavor_index}",
-                )
-            with price_col:
-                price = st.number_input(
-                    "Price (USD)",
-                    min_value=0.0,
-                    value=max(0.0, number(selected_flavor.get("price"), 3.0)),
-                    step=0.5,
-                    key=f"flavor_price_{flavor_index}",
-                )
-            if flavor_id is not None and st.button("Save flavor", key="save_flavor"):
-                result = api(
-                    "PATCH",
-                    f"/menu/{flavor_id}",
-                    json={"available": available, "price": price},
-                )
-                if result is not None:
-                    st.success("Menu item updated.")
-                    st.rerun()
+elif page == "Inventory":
+    heading("Product catalog", "Available inventory",
+            "Every row is a clothing size/color variant currently in stock in Firestore.")
+    refresh_col, search_col = st.columns([1, 3], gap="medium")
+    with refresh_col:
+        st.markdown("<div style='height:1.85rem'></div>", unsafe_allow_html=True)
+        if st.button("↻ Refresh inventory", use_container_width=True):
+            st.rerun()
+    with search_col:
+        query = st.text_input("Search inventory", placeholder="Product, category, SKU, size, color").strip().lower()
+    payload = api("GET", "/products")
+    if payload is not None:
+        rows = inventory_rows(records(payload, "items"))
+        if query:
+            rows = [row for row in rows if query in " ".join(str(v) for v in row.values()).lower()]
+        if rows:
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True,
+                         height=min(600, 42 + 36 * len(rows)))
+            st.caption(f"Showing {len(rows)} in-stock variants. Stock is updated by the backend after confirmed orders.")
         else:
-            st.info("No menu items were returned by the API.")
+            st.info("No available inventory matches your search.")
 
 st.markdown(
-    '<p class="footer-note">MACOT OWNER SPACE &nbsp;·&nbsp; Baked with care, managed with clarity.</p>',
+    '<p class="footer-note">MACOT OWNER SPACE &nbsp;·&nbsp; Clothing inventory and order management.</p>',
     unsafe_allow_html=True,
 )
